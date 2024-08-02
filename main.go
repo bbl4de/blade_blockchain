@@ -1,9 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"log"
+	"math/rand"
+	"strconv"
 	"time"
 
+	"github.com/bbl4de/blade_blockchain/core"
+	"github.com/bbl4de/blade_blockchain/crypto"
 	"github.com/bbl4de/blade_blockchain/network"
+	"github.com/sirupsen/logrus"
 )
 
 // Server - container
@@ -26,15 +33,41 @@ func main() {
 	go func() {
 		
 		for{
-			trRemote.SendMessage(trLocal.Addr(), []byte("Hello world"))
+			if err := sendTransaction(trRemote, trLocal.Addr()); err != nil {
+				logrus.Error(err)
+			}
 			time.Sleep(1 * time.Second)
 		}
 	}()
 
+	privKey := crypto.GeneratePrivateKey()
+
 	opts := network.ServerOpts{
+		PrivateKey: &privKey,
+		ID: "LOCAL",
 		Transports: []network.Transport{trLocal},
 	}	
 	// then we configure and start our local node/server to listen for the messages
-	s := network.NewServer(opts)
+	s, err := network.NewServer(opts)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	s.Start()
+}
+
+func sendTransaction(tr network.Transport, to network.NetAddr) error {
+	// send a transaction to the network
+	privKey := crypto.GeneratePrivateKey()
+	data := []byte(strconv.FormatInt(int64(rand.Intn(10000)), 10))
+	tx := core.NewTransaction(data)
+	tx.Sign(privKey)
+	buf := &bytes.Buffer{}
+	if err := tx.Encode(core.NewGobTxEncoder(buf)); err != nil {
+		return err
+	}
+
+	msg := network.NewMessage(network.MessageTypeTx, buf.Bytes())
+
+	return tr.SendMessage(to, msg.Bytes())
 }

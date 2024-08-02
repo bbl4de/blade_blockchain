@@ -2,8 +2,10 @@ package core
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/gob"
 	"fmt"
+	"time"
 
 	"github.com/bbl4de/blade_blockchain/crypto"
 	"github.com/bbl4de/blade_blockchain/types"
@@ -37,11 +39,28 @@ type Block struct {
 	hash types.Hash
 }
 
-func NewBlock(h *Header, txx []Transaction) *Block {
+func NewBlock(h *Header, txx []Transaction) (*Block , error){
 	return &Block{
 		Header: h,
 		Transactions: txx,
+	}, nil
+}
+
+func NewBlockFromPrevHeader(prevHeader *Header, txx []Transaction) (*Block, error){
+	datahash, err := CalculateDataHash(txx)
+	if err != nil {
+		return nil,err
 	}
+
+	header := &Header {
+		Version: 1,
+		Height: prevHeader.Height + 1,
+		DataHash: datahash, 
+		PrevBlockHash: BlockHasher{}.Hash(prevHeader),
+		Timestamp: time.Now().UnixNano(),
+	}
+
+	return NewBlock(header,txx) 
 }
 
 func (b *Block) AddTransaction(tx *Transaction) {
@@ -56,6 +75,7 @@ func (b *Block) Sign(privKey crypto.PrivateKey) error {
 
 	b.Validator = privKey.PublicKey()	
 	b.Signature = sig
+
 	return nil
 }
 
@@ -64,6 +84,7 @@ func (b *Block) Verify() error {
 	if b.Signature == nil {
 		return fmt.Errorf("block has no signature")
 	}
+	
 	if !b.Signature.Verify(b.Validator, b.Header.Bytes()) {
 		return fmt.Errorf("block has invalid signature")
 	}
@@ -73,6 +94,16 @@ func (b *Block) Verify() error {
 			return err
 		}
 	}
+
+	datahash, err := CalculateDataHash(b.Transactions)
+	if err != nil {
+		return err
+	}
+
+	if datahash != b.DataHash {
+		return fmt.Errorf("block (%s) has invalid data hash", b.Hash(BlockHasher{}))
+	} 
+
 	return nil
 }
 
@@ -93,3 +124,17 @@ func (b *Block) Hash(hasher Hasher[*Header]) types.Hash {
 
 	return b.hash
 }	
+
+func CalculateDataHash(txx []Transaction) (hash types.Hash, err error ) {
+	buf := &bytes.Buffer{}
+
+	for _, tx := range txx {
+		if err = tx.Encode(NewGobTxEncoder(buf)); err != nil {
+			return 
+		}
+	}
+
+	hash = sha256.Sum256(buf.Bytes())
+
+	return
+}
